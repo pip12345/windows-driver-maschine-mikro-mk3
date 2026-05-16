@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -16,7 +18,7 @@ type runtimeConfig struct {
 	activeColor   mikro.Color
 	activeLevel   mikro.ColorLevel
 	padIdleColors [16]mikro.Color
-	padIdleLevel  mikro.ColorLevel
+	padIdleLevels [16]mikro.ColorLevel
 	buttonLEDs    [40]mikro.Intensity
 }
 
@@ -27,7 +29,7 @@ func newRuntimeConfig(cfg Config) runtimeConfig {
 		activeColor:   activeColor,
 		activeLevel:   activeLevel,
 		padIdleColors: parsePadColors(cfg),
-		padIdleLevel:  parsePadLevelIdle(cfg),
+		padIdleLevels: parsePadLevels(cfg),
 		buttonLEDs:    parseButtonLEDs(cfg),
 	}
 }
@@ -44,6 +46,8 @@ func main() {
 	var currentMk3 *mikro.Mk3
 	var currentLightsMu sync.Mutex
 	var currentLights chan func(mikro.Lights) mikro.Lights
+	var currentScreenMu sync.Mutex
+	var currentScreen chan string
 	var runtimeMu sync.RWMutex
 	runtime := newRuntimeConfig(cfg)
 
@@ -99,6 +103,7 @@ func main() {
 			currentMk3Mu.Unlock()
 			deviceCtx, deviceCancel := context.WithCancel(ctx)
 			lightUpdates := startLightWorker(deviceCtx, mk3)
+			screenUpdates := startScreenWorker(deviceCtx, mk3)
 			go func() {
 				<-deviceCtx.Done()
 				_ = mk3.Close()
@@ -106,8 +111,16 @@ func main() {
 			currentLightsMu.Lock()
 			currentLights = lightUpdates
 			currentLightsMu.Unlock()
+			currentScreenMu.Lock()
+			currentScreen = screenUpdates
+			currentScreenMu.Unlock()
 
 			gui.SetStatus("Connected - MIDI port: " + cfg.PortName)
+			if cfg.DisplayMode == "global" {
+				queueScreenText(screenUpdates, cfg.DisplayText)
+			} else if cfg.DisplayMode != "off" {
+				queueScreenText(screenUpdates, "Maschine Mikro MK3\nReady")
+			}
 			runtimeMu.RLock()
 			rt := runtime
 			runtimeMu.RUnlock()
@@ -145,6 +158,7 @@ func main() {
 						return
 					}
 					activePads[idx] = true
+					queueScreenText(screenUpdates, padDisplayText(cfg, idx))
 
 					gui.PadOn(idx, vel)
 
@@ -171,7 +185,7 @@ func main() {
 					runtimeMu.RLock()
 					rt := runtime
 					runtimeMu.RUnlock()
-					idleLevel := rt.padIdleLevel
+					idleLevel := rt.padIdleLevels[idx]
 					idleColor := rt.padIdleColors[idx]
 					queueLightUpdate(lightUpdates, func(lights mikro.Lights) mikro.Lights {
 						lights.Pads[idx] = mikro.ColoredLight{
@@ -195,6 +209,7 @@ func main() {
 						continue
 					}
 					activeButtons[idx] = true
+					queueScreenText(screenUpdates, buttonDisplayText(cfg, btn, idx))
 
 					if cfg.SendButtonNotes {
 						_ = midiPort.SendData(noteOn(cfg.Channel, cfg.ButtonNotes[idx], 127))
@@ -264,6 +279,7 @@ func main() {
 						delta = clampEncoderDelta(delta)
 						value := relativeCCValue(delta)
 						_ = midiPort.SendData(controlChange(cfg.Channel, cfg.EncoderCC, value))
+						queueScreenText(screenUpdates, encoderDisplayText(cfg, value, delta))
 						gui.EncoderTurn(cfg.EncoderCC, value, delta)
 					}
 					prevEncoder = encoder
@@ -282,6 +298,7 @@ func main() {
 					}
 					if send {
 						_ = midiPort.SendData(controlChange(cfg.Channel, cfg.TouchStripCC, value))
+						queueScreenText(screenUpdates, touchStripDisplayText(cfg, cfg.TouchStripCC, value, 1))
 						queueLightUpdate(lightUpdates, func(lights mikro.Lights) mikro.Lights {
 							return touchStripLights(lights, value, rt.activeColor)
 						})
@@ -303,6 +320,7 @@ func main() {
 					}
 					if send {
 						_ = midiPort.SendData(controlChange(cfg.Channel, cfg.TouchStripCC2, value))
+						queueScreenText(screenUpdates, touchStripDisplayText(cfg, cfg.TouchStripCC2, value, 2))
 						queueLightUpdate(lightUpdates, func(lights mikro.Lights) mikro.Lights {
 							return touchStripLights(lights, value, rt.activeColor)
 						})
@@ -329,6 +347,11 @@ func main() {
 				currentLights = nil
 			}
 			currentLightsMu.Unlock()
+			currentScreenMu.Lock()
+			if currentScreen == screenUpdates {
+				currentScreen = nil
+			}
+			currentScreenMu.Unlock()
 			for idx, active := range activePads {
 				if active {
 					_ = midiPort.SendData(noteOff(cfg.Channel, cfg.PadNotes[idx]))
@@ -422,6 +445,14 @@ func parsePadLevelIdle(cfg Config) mikro.ColorLevel {
 	return level
 }
 
+func parsePadLevels(cfg Config) [16]mikro.ColorLevel {
+	levels := [16]mikro.ColorLevel{}
+	for idx, name := range cfg.PadLevels {
+		levels[idx], _ = parseColorLevel(name)
+	}
+	return levels
+}
+
 func parseButtonLEDs(cfg Config) [40]mikro.Intensity {
 	leds := [40]mikro.Intensity{}
 	for idx, name := range cfg.ButtonLEDs {
@@ -436,10 +467,10 @@ func parseButtonLED(cfg Config, idx int) mikro.Intensity {
 }
 
 func defaultLights(lights mikro.Lights, cfg Config, padColors [16]mikro.Color, buttonLEDs [40]mikro.Intensity) mikro.Lights {
-	idleLevel := parsePadLevelIdle(cfg)
+	idleLevels := parsePadLevels(cfg)
 	for idx, color := range padColors {
 		lights.Pads[idx] = mikro.ColoredLight{
-			Level: idleLevel,
+			Level: idleLevels[idx],
 			Color: color,
 		}
 	}
@@ -447,6 +478,60 @@ func defaultLights(lights mikro.Lights, cfg Config, padColors [16]mikro.Color, b
 		lights.Buttons[idx] = buttonLEDs[idx]
 	}
 	return lights
+}
+
+func padDisplayText(cfg Config, idx int) string {
+	switch cfg.DisplayMode {
+	case "off":
+		return ""
+	case "global":
+		return cfg.DisplayText
+	case "name":
+		return fmt.Sprintf("Pad %d\nNote %d", idx+1, cfg.PadNotes[idx])
+	}
+	if text := strings.TrimSpace(cfg.PadDisplayTexts[idx]); text != "" {
+		return text
+	}
+	return fmt.Sprintf("Pad %d\nNote %d", idx+1, cfg.PadNotes[idx])
+}
+
+func buttonDisplayText(cfg Config, btn mikro.Button, idx int) string {
+	switch cfg.DisplayMode {
+	case "off":
+		return ""
+	case "global":
+		return cfg.DisplayText
+	case "name":
+		return fmt.Sprintf("%s\nN%d CC%d", btn, cfg.ButtonNotes[idx], cfg.ButtonCCs[idx])
+	}
+	if text := strings.TrimSpace(cfg.ButtonDisplayTexts[idx]); text != "" {
+		return text
+	}
+	return fmt.Sprintf("%s\nN%d CC%d", btn, cfg.ButtonNotes[idx], cfg.ButtonCCs[idx])
+}
+
+func encoderDisplayText(cfg Config, value uint8, delta int) string {
+	switch cfg.DisplayMode {
+	case "off":
+		return ""
+	case "global":
+		return cfg.DisplayText
+	}
+	dir := "CW"
+	if delta < 0 {
+		dir = "CCW"
+	}
+	return fmt.Sprintf("Encoder\n%s CC%d V%d", dir, cfg.EncoderCC, value)
+}
+
+func touchStripDisplayText(cfg Config, cc, value uint8, strip int) string {
+	switch cfg.DisplayMode {
+	case "off":
+		return ""
+	case "global":
+		return cfg.DisplayText
+	}
+	return fmt.Sprintf("Touch Strip %d\nCC%d V%d", strip, cc, value)
 }
 
 func blinkButton(updates chan func(mikro.Lights) mikro.Lights, btn mikro.Button, idle mikro.Intensity, count int) {

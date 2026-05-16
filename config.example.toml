@@ -30,6 +30,15 @@ pad_colors = [
   "off", "off", "off", "off",
 ]
 
+# Default idle LED brightness for each pad.
+# Options: low, medium, high, faded
+pad_levels = [
+  "low", "low", "low", "low",
+  "low", "low", "low", "low",
+  "low", "low", "low", "low",
+  "low", "low", "low", "low",
+]
+
 # MIDI note for each pad (0-127)
 # Layout matches physical grid:
 #   Row 4: [12] [13] [14] [15]  (Pad13-16)
@@ -41,6 +50,15 @@ pad_notes = [
   40, 41, 42, 43,
   44, 45, 46, 47,
   48, 49, 50, 51,
+]
+
+# Optional custom display text shown on the MK3 screen when each pad is hit.
+# Empty strings fall back to "Pad N / Note X".
+pad_display_texts = [
+  "", "", "", "",
+  "", "", "", "",
+  "", "", "", "",
+  "", "", "", "",
 ]
 
 # Buttons can send MIDI notes, MIDI CCs, or both.
@@ -77,6 +95,8 @@ button_ccs = [
 
 # Button LEDs are not RGB on this device. They support brightness only.
 # Options: off, low, medium, high
+button_led_idle = "off"
+
 button_leds = [
   "off", "off", "off", "off", "off", "off", "off", "off",
   "off", "off", "off", "off", "off", "off", "off", "off",
@@ -84,6 +104,24 @@ button_leds = [
   "off", "off", "off", "off", "off", "off", "off", "off",
   "off", "off", "off", "off", "off", "off", "off", "off",
 ]
+
+# Optional custom display text shown on the MK3 screen when each button is pressed.
+# Empty strings fall back to the button name and MIDI mapping.
+button_display_texts = [
+  "", "", "", "", "", "", "", "",
+  "", "", "", "", "", "", "", "",
+  "", "", "", "", "", "", "", "",
+  "", "", "", "", "", "", "", "",
+  "", "", "", "", "", "", "", "",
+]
+
+# MK3 screen display mode:
+# trigger = custom text if set, otherwise triggered pad/button name
+# name = always triggered pad/button name
+# global = always show display_text
+# off = do not write screen text
+display_mode = "trigger"
+display_text = "Maschine Mikro MK3"
 
 # Encoder sends relative CC values: 1-63 clockwise, 127-65 counter-clockwise.
 encoder_cc = 16

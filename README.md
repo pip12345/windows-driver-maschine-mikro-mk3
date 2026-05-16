@@ -6,12 +6,6 @@ a virtual MIDI port that any DAW can use.
 
 Mostly AI slop, but works and gets past the hardware DRM
 
-![Main app window](images/main.png)
-
-![Pad and button config](images/config.png)
-
-![Global config](images/config_global.png)
-
 ## Prerequisites
 
 1. **virtualMIDI driver** - Install [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html)
@@ -43,9 +37,13 @@ Copy `config.example.toml` to `config.toml` to customize:
 - MIDI channel (default: 10 / drums)
 - Pad-to-note mapping (default: GM drum map)
 - Per-pad default LED colors
-- Global active/idle pad LED brightness
+- Per-pad and global active/idle pad LED brightness
+- Per-pad custom MK3 screen text
 - Button note and CC mappings
 - Per-button default LED brightness (`off`, `low`, `medium`, or `high`)
+- Global button default LED brightness
+- Per-button custom MK3 screen text
+- MK3 screen display presets (`trigger`, `name`, `global`, or `off`)
 - Encoder and touch strip CC numbers
 - Touch strip raw min/max/deadzone calibration
 - Touch strip release behavior (`hold`, `zero`, or `center`)
@@ -54,6 +52,12 @@ You can also edit configuration inside the app:
 - Click a button in the GUI to edit that button
 - Right-click a button to set only its default LED brightness.
 - Click `Config` to edit global settings.
+
+MK3 screen modes:
+- `trigger`: show custom pad/button text when set, otherwise show the triggered pad/button name.
+- `name`: always show the triggered pad/button name.
+- `global`: always show `display_text`.
+- `off`: do not write screen text.
 
 The app writes changes to `config.toml` automatically when you save a dialog.
 
@@ -99,3 +103,13 @@ MIDI messages, which are sent through a virtual MIDI port created via the
 ## License
 
 Unlicense. Do whatever you want with it.
+
+## Screenshots
+
+![Main app window](images/main.png)
+
+
+![Pad and button config](images/config.png)
+
+
+![Global config](images/config_global.png)

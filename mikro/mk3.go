@@ -139,10 +139,10 @@ func (m *Mk3) SetScreen(img image.Image) error {
 		Pixels:        [256]byte(bitPixels[256:]),
 	}
 
-	if _, err := m.device.Write(stateHigh.Encode()); err != nil {
+	if _, err := writeOutputReport(m.device, m.path, stateHigh.Encode()); err != nil {
 		return fmt.Errorf("could not write updated higher screen state: %w", err)
 	}
-	if _, err := m.device.Write(stateLow.Encode()); err != nil {
+	if _, err := writeOutputReport(m.device, m.path, stateLow.Encode()); err != nil {
 		return fmt.Errorf("could not write updated lower screen state: %w", err)
 	}
 

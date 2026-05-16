@@ -113,6 +113,24 @@ type tappableStackRenderer struct {
 	objects []fyne.CanvasObject
 }
 
+type scrollEntry struct {
+	widget.Entry
+	parent *container.Scroll
+}
+
+func newScrollEntry() *scrollEntry {
+	e := &scrollEntry{}
+	e.Scroll = fyne.ScrollNone
+	e.ExtendBaseWidget(e)
+	return e
+}
+
+func (e *scrollEntry) Scrolled(ev *fyne.ScrollEvent) {
+	if e.parent != nil {
+		e.parent.Scrolled(ev)
+	}
+}
+
 func (r *tappableStackRenderer) Layout(size fyne.Size) {
 	for _, obj := range r.objects {
 		obj.Resize(size)
@@ -319,10 +337,17 @@ func (g *GUI) showPadConfig(idx int) {
 	note.SetText(strconv.Itoa(int(g.cfg.PadNotes[idx])))
 	colorSelect := widget.NewSelect(colorOptions(), nil)
 	colorSelect.SetSelected(g.cfg.PadColors[idx])
+	levelSelect := widget.NewSelect(colorLevelOptions(), nil)
+	levelSelect.SetSelected(g.cfg.PadLevels[idx])
+	displayText := widget.NewEntry()
+	displayText.SetText(g.cfg.PadDisplayTexts[idx])
+	displayText.SetPlaceHolder(fmt.Sprintf("Pad %d / Note %d", idx+1, g.cfg.PadNotes[idx]))
 
 	d := dialog.NewForm(fmt.Sprintf("Pad %d Config", idx+1), "Save", "Cancel", []*widget.FormItem{
 		widget.NewFormItem("MIDI note", note),
 		widget.NewFormItem("Idle color", colorSelect),
+		widget.NewFormItem("Idle brightness", levelSelect),
+		widget.NewFormItem("Display text", displayText),
 	}, func(ok bool) {
 		if !ok {
 			return
@@ -334,6 +359,8 @@ func (g *GUI) showPadConfig(idx int) {
 		}
 		g.cfg.PadNotes[idx] = n
 		g.cfg.PadColors[idx] = colorSelect.Selected
+		g.cfg.PadLevels[idx] = levelSelect.Selected
+		g.cfg.PadDisplayTexts[idx] = displayText.Text
 		g.saveConfig()
 	}, g.window)
 	d.Show()
@@ -358,11 +385,15 @@ func (g *GUI) showButtonConfig(idx int) {
 	cc.SetText(strconv.Itoa(int(g.cfg.ButtonCCs[idx])))
 	ledSelect := widget.NewSelect(intensityOptions(), nil)
 	ledSelect.SetSelected(g.cfg.ButtonLEDs[idx])
+	displayText := widget.NewEntry()
+	displayText.SetText(g.cfg.ButtonDisplayTexts[idx])
+	displayText.SetPlaceHolder(mikro.Button(idx).String())
 
 	d := dialog.NewForm(fmt.Sprintf("%s Config", mikro.Button(idx)), "Save", "Cancel", []*widget.FormItem{
 		widget.NewFormItem("MIDI note", note),
 		widget.NewFormItem("MIDI CC", cc),
 		widget.NewFormItem("Default LED", ledSelect),
+		widget.NewFormItem("Display text", displayText),
 	}, func(ok bool) {
 		if !ok {
 			return
@@ -380,6 +411,7 @@ func (g *GUI) showButtonConfig(idx int) {
 		g.cfg.ButtonNotes[idx] = n
 		g.cfg.ButtonCCs[idx] = c
 		g.cfg.ButtonLEDs[idx] = ledSelect.Selected
+		g.cfg.ButtonDisplayTexts[idx] = displayText.Text
 		g.saveConfig()
 	}, g.window)
 	d.Show()
@@ -398,9 +430,9 @@ func (g *GUI) showButtonLEDMenu(idx int, pos fyne.Position) {
 }
 
 func (g *GUI) showGlobalConfig() {
-	port := widget.NewEntry()
+	port := newScrollEntry()
 	port.SetText(g.cfg.PortName)
-	channel := widget.NewEntry()
+	channel := newScrollEntry()
 	channel.SetText(strconv.Itoa(int(g.cfg.Channel)))
 	activeColor := widget.NewSelect(colorOptions(), nil)
 	activeColor.SetSelected(g.cfg.PadColorActive)
@@ -408,17 +440,17 @@ func (g *GUI) showGlobalConfig() {
 	activeLevel.SetSelected(g.cfg.PadLevelActive)
 	idleLevel := widget.NewSelect(colorLevelOptions(), nil)
 	idleLevel.SetSelected(g.cfg.PadLevelIdle)
-	encoderCC := widget.NewEntry()
+	encoderCC := newScrollEntry()
 	encoderCC.SetText(strconv.Itoa(int(g.cfg.EncoderCC)))
-	stripCC := widget.NewEntry()
+	stripCC := newScrollEntry()
 	stripCC.SetText(strconv.Itoa(int(g.cfg.TouchStripCC)))
-	stripCC2 := widget.NewEntry()
+	stripCC2 := newScrollEntry()
 	stripCC2.SetText(strconv.Itoa(int(g.cfg.TouchStripCC2)))
-	stripMin := widget.NewEntry()
+	stripMin := newScrollEntry()
 	stripMin.SetText(strconv.Itoa(int(g.cfg.TouchStripMin)))
-	stripMax := widget.NewEntry()
+	stripMax := newScrollEntry()
 	stripMax.SetText(strconv.Itoa(int(g.cfg.TouchStripMax)))
-	stripDeadzone := widget.NewEntry()
+	stripDeadzone := newScrollEntry()
 	stripDeadzone.SetText(strconv.Itoa(int(g.cfg.TouchStripDeadzone)))
 	stripRelease := widget.NewSelect([]string{"hold", "zero", "center"}, nil)
 	stripRelease.SetSelected(g.cfg.TouchStripRelease)
@@ -430,13 +462,21 @@ func (g *GUI) showGlobalConfig() {
 	transport.SetChecked(g.cfg.EnableTransport)
 	buttonLEDs := widget.NewCheck("", nil)
 	buttonLEDs.SetChecked(g.cfg.ButtonLEDEnabled)
+	buttonIdleLED := widget.NewSelect(intensityOptions(), nil)
+	buttonIdleLED.SetSelected(g.cfg.ButtonLEDIdle)
+	displayMode := widget.NewSelect([]string{"trigger", "name", "global", "off"}, nil)
+	displayMode.SetSelected(g.cfg.DisplayMode)
+	displayText := newScrollEntry()
+	displayText.SetText(g.cfg.DisplayText)
+	displayText.SetPlaceHolder("Global screen text")
 
-	d := dialog.NewForm("Global Config", "Save", "Cancel", []*widget.FormItem{
+	items := []*widget.FormItem{
 		widget.NewFormItem("Port name", port),
 		widget.NewFormItem("MIDI channel", channel),
 		widget.NewFormItem("Active pad color", activeColor),
 		widget.NewFormItem("Pad active brightness", activeLevel),
 		widget.NewFormItem("Pad idle brightness", idleLevel),
+		widget.NewFormItem("Button idle brightness", buttonIdleLED),
 		widget.NewFormItem("Encoder CC", encoderCC),
 		widget.NewFormItem("Touch strip CC 1", stripCC),
 		widget.NewFormItem("Touch strip CC 2", stripCC2),
@@ -448,7 +488,17 @@ func (g *GUI) showGlobalConfig() {
 		widget.NewFormItem("Send button CCs", sendCCs),
 		widget.NewFormItem("Transport", transport),
 		widget.NewFormItem("Button LEDs", buttonLEDs),
-	}, func(ok bool) {
+		widget.NewFormItem("Display mode", displayMode),
+		widget.NewFormItem("Global display text", displayText),
+	}
+	form := widget.NewForm(items...)
+	scroll := container.NewVScroll(form)
+	scroll.SetMinSize(fyne.NewSize(500, 560))
+	for _, entry := range []*scrollEntry{port, channel, encoderCC, stripCC, stripCC2, stripMin, stripMax, stripDeadzone, displayText} {
+		entry.parent = scroll
+	}
+
+	d := dialog.NewCustomConfirm("Global Config", "Save", "Cancel", scroll, func(ok bool) {
 		if !ok {
 			return
 		}
@@ -497,6 +547,10 @@ func (g *GUI) showGlobalConfig() {
 		g.cfg.PadColorActive = activeColor.Selected
 		g.cfg.PadLevelActive = activeLevel.Selected
 		g.cfg.PadLevelIdle = idleLevel.Selected
+		g.cfg.ButtonLEDIdle = buttonIdleLED.Selected
+		for i := range g.cfg.ButtonLEDs {
+			g.cfg.ButtonLEDs[i] = buttonIdleLED.Selected
+		}
 		g.cfg.EncoderCC = enc
 		g.cfg.TouchStripCC = s1
 		g.cfg.TouchStripCC2 = s2
@@ -508,9 +562,11 @@ func (g *GUI) showGlobalConfig() {
 		g.cfg.SendButtonCCs = sendCCs.Checked
 		g.cfg.EnableTransport = transport.Checked
 		g.cfg.ButtonLEDEnabled = buttonLEDs.Checked
+		g.cfg.DisplayMode = displayMode.Selected
+		g.cfg.DisplayText = displayText.Text
 		g.saveConfig()
 	}, g.window)
-	d.Resize(fyne.NewSize(460, 640))
+	d.Resize(fyne.NewSize(560, 680))
 	d.Show()
 }
 

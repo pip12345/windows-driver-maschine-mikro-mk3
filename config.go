@@ -17,11 +17,17 @@ type Config struct {
 	PadLevelActive     string     `toml:"pad_level_active"`
 	PadLevelIdle       string     `toml:"pad_level_idle"`
 	PadColors          [16]string `toml:"pad_colors"`
+	PadLevels          [16]string `toml:"pad_levels"`
+	PadDisplayTexts    [16]string `toml:"pad_display_texts"`
 	SendButtonNotes    bool       `toml:"send_button_notes"`
 	SendButtonCCs      bool       `toml:"send_button_ccs"`
 	ButtonNotes        [40]uint8  `toml:"button_notes"`
 	ButtonCCs          [40]uint8  `toml:"button_ccs"`
+	ButtonLEDIdle      string     `toml:"button_led_idle"`
 	ButtonLEDs         [40]string `toml:"button_leds"`
+	ButtonDisplayTexts [40]string `toml:"button_display_texts"`
+	DisplayMode        string     `toml:"display_mode"`
+	DisplayText        string     `toml:"display_text"`
 	EncoderCC          uint8      `toml:"encoder_cc"`
 	TouchStripCC       uint8      `toml:"touch_strip_cc"`
 	TouchStripCC2      uint8      `toml:"touch_strip_cc_2"`
@@ -105,12 +111,30 @@ func defaultPadColors() [16]string {
 	return colors
 }
 
+func defaultPadLevels() [16]string {
+	levels := [16]string{}
+	for i := range levels {
+		levels[i] = "low"
+	}
+	return levels
+}
+
 func defaultButtonLEDs() [40]string {
 	leds := [40]string{}
 	for i := range leds {
 		leds[i] = "off"
 	}
 	return leds
+}
+
+func defaultPadDisplayTexts() [16]string {
+	texts := [16]string{}
+	return texts
+}
+
+func defaultButtonDisplayTexts() [40]string {
+	texts := [40]string{}
+	return texts
 }
 
 func defaultConfig() Config {
@@ -123,11 +147,17 @@ func defaultConfig() Config {
 		PadLevelActive:     "high",
 		PadLevelIdle:       "low",
 		PadColors:          defaultPadColors(),
+		PadLevels:          defaultPadLevels(),
+		PadDisplayTexts:    defaultPadDisplayTexts(),
 		SendButtonNotes:    true,
 		SendButtonCCs:      true,
 		ButtonNotes:        defaultButtonNotes,
 		ButtonCCs:          defaultButtonCCs,
+		ButtonLEDIdle:      "off",
 		ButtonLEDs:         defaultButtonLEDs(),
+		ButtonDisplayTexts: defaultButtonDisplayTexts(),
+		DisplayMode:        "trigger",
+		DisplayText:        "Maschine Mikro MK3",
 		EncoderCC:          16,
 		TouchStripCC:       17,
 		TouchStripCC2:      18,
@@ -165,6 +195,32 @@ func loadConfig(path string) (Config, error) {
 		if allPadColorsOff {
 			for i := range cfg.PadColors {
 				cfg.PadColors[i] = cfg.PadColorIdle
+			}
+		}
+	}
+	allPadLevelsDefault := true
+	for _, level := range cfg.PadLevels {
+		if level != "low" && level != "" {
+			allPadLevelsDefault = false
+			break
+		}
+	}
+	if allPadLevelsDefault && cfg.PadLevelIdle != "low" {
+		for i := range cfg.PadLevels {
+			cfg.PadLevels[i] = cfg.PadLevelIdle
+		}
+	}
+	if cfg.ButtonLEDIdle != "off" {
+		allButtonLEDsOff := true
+		for _, led := range cfg.ButtonLEDs {
+			if led != "off" {
+				allButtonLEDsOff = false
+				break
+			}
+		}
+		if allButtonLEDsOff {
+			for i := range cfg.ButtonLEDs {
+				cfg.ButtonLEDs[i] = cfg.ButtonLEDIdle
 			}
 		}
 	}
@@ -223,10 +279,21 @@ func loadConfig(path string) (Config, error) {
 			return cfg, fmt.Errorf("pad_colors[%d]: %w", i, err)
 		}
 	}
+	for i, level := range cfg.PadLevels {
+		if _, err := parseColorLevel(level); err != nil {
+			return cfg, fmt.Errorf("pad_levels[%d]: %w", i, err)
+		}
+	}
 	for i, intensity := range cfg.ButtonLEDs {
 		if _, err := parseIntensity(intensity); err != nil {
 			return cfg, fmt.Errorf("button_leds[%d]: %w", i, err)
 		}
+	}
+	if _, err := parseIntensity(cfg.ButtonLEDIdle); err != nil {
+		return cfg, fmt.Errorf("button_led_idle: %w", err)
+	}
+	if cfg.DisplayMode != "trigger" && cfg.DisplayMode != "name" && cfg.DisplayMode != "global" && cfg.DisplayMode != "off" {
+		return cfg, fmt.Errorf("display_mode must be trigger, name, global, or off, got %q", cfg.DisplayMode)
 	}
 
 	return cfg, nil
