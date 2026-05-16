@@ -1,0 +1,29 @@
+# Maschine Mikro MK3 MIDI Driver Configuration
+# Copy this to config.toml and edit as needed.
+
+# Virtual MIDI port name (visible in your DAW)
+port_name = "Maschine Mikro MK3"
+
+# MIDI channel (0-15, where 9 = channel 10 = GM drums)
+channel = 9
+
+# Pad LED color when hit
+# Options: off, red, orange, light_orange, warm_yellow, yellow, lime, green,
+#          mint, cyan, turquoise, blue, plum, violet, purple, magenta, fuchsia, white
+pad_color_active = "cyan"
+
+# Pad LED color when idle
+pad_color_idle = "off"
+
+# MIDI note for each pad (0-127)
+# Layout matches physical grid:
+#   Row 4: [12] [13] [14] [15]  (Pad13-16)
+#   Row 3: [ 8] [ 9] [10] [11]  (Pad9-12)
+#   Row 2: [ 4] [ 5] [ 6] [ 7]  (Pad5-8)
+#   Row 1: [ 0] [ 1] [ 2] [ 3]  (Pad1-4)
+pad_notes = [
+  36, 37, 38, 39,
+  40, 41, 42, 43,
+  44, 45, 46, 47,
+  48, 49, 50, 51,
+]
