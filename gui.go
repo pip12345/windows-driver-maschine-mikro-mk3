@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"essaim.dev/mikro"
 	"fyne.io/fyne/v2"
@@ -58,12 +59,19 @@ type GUI struct {
 	statusLbl  *widget.Label
 	logLbl     *widget.Label
 
-	mu       sync.Mutex
-	logLines []string
-	logCount int
+	mu         sync.Mutex
+	logLines   []string
+	padUpdates chan padUpdate
+	logUpdates chan string
 
 	padIdleColors [16]color.Color
 	activeColor   color.Color
+}
+
+type padUpdate struct {
+	idx      int
+	active   bool
+	velocity uint8
 }
 
 var controlIdleColor = color.NRGBA{R: 45, G: 45, B: 50, A: 255}
@@ -138,7 +146,12 @@ func (r *tappableStackRenderer) Objects() []fyne.CanvasObject {
 func (r *tappableStackRenderer) Destroy() {}
 
 func NewGUI(cfg *Config) *GUI {
-	g := &GUI{cfg: cfg, configPath: "config.toml"}
+	g := &GUI{
+		cfg:        cfg,
+		configPath: "config.toml",
+		padUpdates: make(chan padUpdate, 128),
+		logUpdates: make(chan string, 1024),
+	}
 
 	g.activeColor = guiColors[cfg.PadColorActive]
 	if g.activeColor == nil {
@@ -229,6 +242,8 @@ func NewGUI(cfg *Config) *GUI {
 	content := container.NewBorder(top, nil, nil, nil, container.NewVScroll(g.logLbl))
 
 	g.window.SetContent(content)
+	g.startPadUpdateWorker()
+	g.startLogWorker()
 	return g
 }
 
@@ -403,6 +418,8 @@ func (g *GUI) showGlobalConfig() {
 	stripMin.SetText(strconv.Itoa(int(g.cfg.TouchStripMin)))
 	stripMax := widget.NewEntry()
 	stripMax.SetText(strconv.Itoa(int(g.cfg.TouchStripMax)))
+	stripDeadzone := widget.NewEntry()
+	stripDeadzone.SetText(strconv.Itoa(int(g.cfg.TouchStripDeadzone)))
 	stripRelease := widget.NewSelect([]string{"hold", "zero", "center"}, nil)
 	stripRelease.SetSelected(g.cfg.TouchStripRelease)
 	sendNotes := widget.NewCheck("", nil)
@@ -425,6 +442,7 @@ func (g *GUI) showGlobalConfig() {
 		widget.NewFormItem("Touch strip CC 2", stripCC2),
 		widget.NewFormItem("Touch strip min", stripMin),
 		widget.NewFormItem("Touch strip max", stripMax),
+		widget.NewFormItem("Touch strip deadzone", stripDeadzone),
 		widget.NewFormItem("Touch release", stripRelease),
 		widget.NewFormItem("Send button notes", sendNotes),
 		widget.NewFormItem("Send button CCs", sendCCs),
@@ -468,6 +486,11 @@ func (g *GUI) showGlobalConfig() {
 			dialog.ShowError(fmt.Errorf("touch strip min must be less than max"), g.window)
 			return
 		}
+		deadzone, err := parseUint8Entry("Touch strip deadzone", stripDeadzone.Text, 0, int(max-min))
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
 
 		g.cfg.PortName = port.Text
 		g.cfg.Channel = ch
@@ -479,6 +502,7 @@ func (g *GUI) showGlobalConfig() {
 		g.cfg.TouchStripCC2 = s2
 		g.cfg.TouchStripMin = min
 		g.cfg.TouchStripMax = max
+		g.cfg.TouchStripDeadzone = deadzone
 		g.cfg.TouchStripRelease = stripRelease.Selected
 		g.cfg.SendButtonNotes = sendNotes.Checked
 		g.cfg.SendButtonCCs = sendCCs.Checked
@@ -519,26 +543,64 @@ func (g *GUI) SetStatus(text string) {
 	})
 }
 
+func (g *GUI) startPadUpdateWorker() {
+	go func() {
+		ticker := time.NewTicker(16 * time.Millisecond)
+		defer ticker.Stop()
+		var latest [16]padUpdate
+		var pending [16]bool
+		for {
+			select {
+			case update := <-g.padUpdates:
+				latest[update.idx] = update
+				pending[update.idx] = true
+			case <-ticker.C:
+				updates := latest
+				toApply := pending
+				pending = [16]bool{}
+				if toApply == [16]bool{} {
+					continue
+				}
+				fyne.Do(func() {
+					for idx, ok := range toApply {
+						if !ok {
+							continue
+						}
+						update := updates[idx]
+						if update.active {
+							g.pads[idx].FillColor = g.activeColor
+							g.pads[idx].Refresh()
+							continue
+						}
+						g.pads[idx].FillColor = g.padIdleColors[idx]
+						g.pads[idx].Refresh()
+					}
+				})
+			}
+		}
+	}()
+}
+
 func (g *GUI) PadOn(idx int, velocity uint8) {
 	if idx < 0 || idx > 15 {
 		return
 	}
-	fyne.Do(func() {
-		g.pads[idx].FillColor = g.activeColor
-		g.pads[idx].Refresh()
-		g.addLogEvery(4, fmt.Sprintf("Pad %2d ON  vel %3d", idx+1, velocity))
-	})
+	select {
+	case g.padUpdates <- padUpdate{idx: idx, active: true, velocity: velocity}:
+	default:
+	}
+	g.addLogAsync(fmt.Sprintf("Pad %2d ON  vel %3d", idx+1, velocity))
 }
 
 func (g *GUI) PadOff(idx int) {
 	if idx < 0 || idx > 15 {
 		return
 	}
-	fyne.Do(func() {
-		g.pads[idx].FillColor = g.padIdleColors[idx]
-		g.pads[idx].Refresh()
-		g.addLogEvery(4, fmt.Sprintf("Pad %2d OFF", idx+1))
-	})
+	select {
+	case g.padUpdates <- padUpdate{idx: idx}:
+	default:
+	}
+	g.addLogAsync(fmt.Sprintf("Pad %2d OFF", idx+1))
 }
 
 func (g *GUI) ButtonOn(btn mikro.Button, note, cc uint8) {
@@ -590,14 +652,50 @@ func (g *GUI) addLogLocked(line string) {
 	g.logLbl.SetText(strings.Join(g.logLines, "\n") + "\n")
 }
 
-func (g *GUI) addLogEvery(n int, line string) {
-	g.mu.Lock()
-	g.logCount++
-	shouldLog := g.logCount%n == 0
-	g.mu.Unlock()
-	if shouldLog {
-		g.addLogLocked(line)
+func (g *GUI) addLogAsync(line string) {
+	select {
+	case g.logUpdates <- line:
+	default:
+		select {
+		case <-g.logUpdates:
+		default:
+		}
+		select {
+		case g.logUpdates <- line:
+		default:
+		}
 	}
+}
+
+func (g *GUI) startLogWorker() {
+	go func() {
+		ticker := time.NewTicker(16 * time.Millisecond)
+		defer ticker.Stop()
+		pending := make([]string, 0, 64)
+		for {
+			select {
+			case line := <-g.logUpdates:
+				pending = append(pending, line)
+			case <-ticker.C:
+				if len(pending) == 0 {
+					continue
+				}
+				lines := append([]string(nil), pending...)
+				pending = pending[:0]
+				fyne.Do(func() {
+					g.mu.Lock()
+					defer g.mu.Unlock()
+					for i := len(lines) - 1; i >= 0; i-- {
+						g.logLines = append([]string{lines[i]}, g.logLines...)
+					}
+					if len(g.logLines) > 30 {
+						g.logLines = g.logLines[:30]
+					}
+					g.logLbl.SetText(strings.Join(g.logLines, "\n") + "\n")
+				})
+			}
+		}
+	}()
 }
 
 func (g *GUI) Run() {

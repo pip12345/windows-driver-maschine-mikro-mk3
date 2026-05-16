@@ -9,27 +9,28 @@ import (
 )
 
 type Config struct {
-	PortName          string     `toml:"port_name"`
-	Channel           uint8      `toml:"channel"`
-	PadNotes          [16]uint8  `toml:"pad_notes"`
-	PadColorActive    string     `toml:"pad_color_active"`
-	PadColorIdle      string     `toml:"pad_color_idle"`
-	PadLevelActive    string     `toml:"pad_level_active"`
-	PadLevelIdle      string     `toml:"pad_level_idle"`
-	PadColors         [16]string `toml:"pad_colors"`
-	SendButtonNotes   bool       `toml:"send_button_notes"`
-	SendButtonCCs     bool       `toml:"send_button_ccs"`
-	ButtonNotes       [40]uint8  `toml:"button_notes"`
-	ButtonCCs         [40]uint8  `toml:"button_ccs"`
-	ButtonLEDs        [40]string `toml:"button_leds"`
-	EncoderCC         uint8      `toml:"encoder_cc"`
-	TouchStripCC      uint8      `toml:"touch_strip_cc"`
-	TouchStripCC2     uint8      `toml:"touch_strip_cc_2"`
-	TouchStripRelease string     `toml:"touch_strip_release"`
-	TouchStripMin     uint8      `toml:"touch_strip_min"`
-	TouchStripMax     uint8      `toml:"touch_strip_max"`
-	EnableTransport   bool       `toml:"enable_transport"`
-	ButtonLEDEnabled  bool       `toml:"button_led_enabled"`
+	PortName           string     `toml:"port_name"`
+	Channel            uint8      `toml:"channel"`
+	PadNotes           [16]uint8  `toml:"pad_notes"`
+	PadColorActive     string     `toml:"pad_color_active"`
+	PadColorIdle       string     `toml:"pad_color_idle"`
+	PadLevelActive     string     `toml:"pad_level_active"`
+	PadLevelIdle       string     `toml:"pad_level_idle"`
+	PadColors          [16]string `toml:"pad_colors"`
+	SendButtonNotes    bool       `toml:"send_button_notes"`
+	SendButtonCCs      bool       `toml:"send_button_ccs"`
+	ButtonNotes        [40]uint8  `toml:"button_notes"`
+	ButtonCCs          [40]uint8  `toml:"button_ccs"`
+	ButtonLEDs         [40]string `toml:"button_leds"`
+	EncoderCC          uint8      `toml:"encoder_cc"`
+	TouchStripCC       uint8      `toml:"touch_strip_cc"`
+	TouchStripCC2      uint8      `toml:"touch_strip_cc_2"`
+	TouchStripRelease  string     `toml:"touch_strip_release"`
+	TouchStripMin      uint8      `toml:"touch_strip_min"`
+	TouchStripMax      uint8      `toml:"touch_strip_max"`
+	TouchStripDeadzone uint8      `toml:"touch_strip_deadzone"`
+	EnableTransport    bool       `toml:"enable_transport"`
+	ButtonLEDEnabled   bool       `toml:"button_led_enabled"`
 }
 
 // Available color names -> mikro.Color
@@ -114,27 +115,28 @@ func defaultButtonLEDs() [40]string {
 
 func defaultConfig() Config {
 	return Config{
-		PortName:          "Maschine Mikro MK3",
-		Channel:           9, // MIDI channel 10 (0-indexed)
-		PadNotes:          defaultPadNotes,
-		PadColorActive:    "cyan",
-		PadColorIdle:      "off",
-		PadLevelActive:    "high",
-		PadLevelIdle:      "low",
-		PadColors:         defaultPadColors(),
-		SendButtonNotes:   true,
-		SendButtonCCs:     true,
-		ButtonNotes:       defaultButtonNotes,
-		ButtonCCs:         defaultButtonCCs,
-		ButtonLEDs:        defaultButtonLEDs(),
-		EncoderCC:         16,
-		TouchStripCC:      17,
-		TouchStripCC2:     18,
-		TouchStripRelease: "hold",
-		TouchStripMin:     0,
-		TouchStripMax:     200,
-		EnableTransport:   true,
-		ButtonLEDEnabled:  true,
+		PortName:           "Maschine Mikro MK3",
+		Channel:            9, // MIDI channel 10 (0-indexed)
+		PadNotes:           defaultPadNotes,
+		PadColorActive:     "cyan",
+		PadColorIdle:       "off",
+		PadLevelActive:     "high",
+		PadLevelIdle:       "low",
+		PadColors:          defaultPadColors(),
+		SendButtonNotes:    true,
+		SendButtonCCs:      true,
+		ButtonNotes:        defaultButtonNotes,
+		ButtonCCs:          defaultButtonCCs,
+		ButtonLEDs:         defaultButtonLEDs(),
+		EncoderCC:          16,
+		TouchStripCC:       17,
+		TouchStripCC2:      18,
+		TouchStripRelease:  "hold",
+		TouchStripMin:      0,
+		TouchStripMax:      200,
+		TouchStripDeadzone: 1,
+		EnableTransport:    true,
+		ButtonLEDEnabled:   true,
 	}
 }
 
@@ -199,6 +201,9 @@ func loadConfig(path string) (Config, error) {
 	}
 	if cfg.TouchStripMin >= cfg.TouchStripMax {
 		return cfg, fmt.Errorf("touch_strip_min must be less than touch_strip_max")
+	}
+	if cfg.TouchStripDeadzone > cfg.TouchStripMax-cfg.TouchStripMin {
+		return cfg, fmt.Errorf("touch_strip_deadzone must fit inside touch strip min/max range")
 	}
 
 	if _, err := parseColor(cfg.PadColorActive); err != nil {

@@ -96,6 +96,9 @@ touch_strip_cc_2 = 18
 touch_strip_min = 0
 touch_strip_max = 200
 
+# Raw values this close to touch_strip_min clamp to MIDI 0.
+touch_strip_deadzone = 1
+
 # What to send when the strip reports 0 after release:
 # hold = send nothing, zero = send 0, center = send 64
 touch_strip_release = "hold"

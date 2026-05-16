@@ -126,12 +126,12 @@ func clampEncoderDelta(delta int) int {
 	return 0
 }
 
-func scaleTouchStripValue(v, min, max uint8) uint8 {
-	if v <= min {
+func scaleTouchStripValue(v, min, max, deadzone uint8) uint8 {
+	if uint16(v) <= uint16(min)+uint16(deadzone) {
 		return 0
 	}
 	if v >= max {
 		return 127
 	}
-	return uint8((uint16(v-min)*127 + uint16(max-min)/2) / uint16(max-min))
+	return uint8(uint16(v-min) * 127 / uint16(max-min))
 }

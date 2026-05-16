@@ -157,12 +157,9 @@ func (m *Mk3) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		default:
-			n, err := m.device.ReadTimeout(b, 500)
+			n, err := m.device.Read(b)
 			if err != nil {
 				return fmt.Errorf("could not read message from device: %w", err)
-			}
-			if n == 0 {
-				continue // timeout, no data yet
 			}
 			switch b[0] {
 			case buttonReport:

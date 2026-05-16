@@ -6,6 +6,12 @@ a virtual MIDI port that any DAW can use.
 
 Mostly AI slop, but works and gets past the hardware DRM
 
+![Main app window](images/main.png)
+
+![Pad and button config](images/config.png)
+
+![Global config](images/config_global.png)
+
 ## Prerequisites
 
 1. **virtualMIDI driver** - Install [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html)
@@ -41,13 +47,11 @@ Copy `config.example.toml` to `config.toml` to customize:
 - Button note and CC mappings
 - Per-button default LED brightness (`off`, `low`, `medium`, or `high`)
 - Encoder and touch strip CC numbers
-- Touch strip raw min/max calibration
+- Touch strip raw min/max/deadzone calibration
 - Touch strip release behavior (`hold`, `zero`, or `center`)
 
 You can also edit configuration inside the app:
-- Click a pad in the GUI to edit that pad's note and idle LED color.
-- Right-click a pad to set only its idle LED color.
-- Click a button in the GUI to edit that button's note, CC, and default LED brightness.
+- Click a button in the GUI to edit that button
 - Right-click a button to set only its default LED brightness.
 - Click `Config` to edit global settings.
 

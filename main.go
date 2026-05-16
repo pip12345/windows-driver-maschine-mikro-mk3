@@ -12,6 +12,26 @@ import (
 	"essaim.dev/mikro"
 )
 
+type runtimeConfig struct {
+	activeColor   mikro.Color
+	activeLevel   mikro.ColorLevel
+	padIdleColors [16]mikro.Color
+	padIdleLevel  mikro.ColorLevel
+	buttonLEDs    [40]mikro.Intensity
+}
+
+func newRuntimeConfig(cfg Config) runtimeConfig {
+	activeColor, _ := parseColor(cfg.PadColorActive)
+	activeLevel, _ := parseColorLevel(cfg.PadLevelActive)
+	return runtimeConfig{
+		activeColor:   activeColor,
+		activeLevel:   activeLevel,
+		padIdleColors: parsePadColors(cfg),
+		padIdleLevel:  parsePadLevelIdle(cfg),
+		buttonLEDs:    parseButtonLEDs(cfg),
+	}
+}
+
 func main() {
 	log.SetFlags(0)
 
@@ -24,9 +44,15 @@ func main() {
 	var currentMk3 *mikro.Mk3
 	var currentLightsMu sync.Mutex
 	var currentLights chan func(mikro.Lights) mikro.Lights
+	var runtimeMu sync.RWMutex
+	runtime := newRuntimeConfig(cfg)
 
 	gui := NewGUI(&cfg)
 	gui.onConfigSaved = func(updated Config) {
+		runtimeMu.Lock()
+		runtime = newRuntimeConfig(updated)
+		runtimeMu.Unlock()
+
 		currentLightsMu.Lock()
 		lights := currentLights
 		currentLightsMu.Unlock()
@@ -73,17 +99,24 @@ func main() {
 			currentMk3Mu.Unlock()
 			deviceCtx, deviceCancel := context.WithCancel(ctx)
 			lightUpdates := startLightWorker(deviceCtx, mk3)
+			go func() {
+				<-deviceCtx.Done()
+				_ = mk3.Close()
+			}()
 			currentLightsMu.Lock()
 			currentLights = lightUpdates
 			currentLightsMu.Unlock()
 
 			gui.SetStatus("Connected - MIDI port: " + cfg.PortName)
-			padIdleColors := parsePadColors(cfg)
-			buttonLEDs := parseButtonLEDs(cfg)
+			runtimeMu.RLock()
+			rt := runtime
+			runtimeMu.RUnlock()
+			padIdleColors := rt.padIdleColors
+			buttonLEDs := rt.buttonLEDs
 			queueLightUpdate(lightUpdates, func(l mikro.Lights) mikro.Lights {
 				return defaultLights(l, cfg, padIdleColors, buttonLEDs)
 			})
-			go blinkButton(mk3, mikro.ButtonProject, buttonLEDs[int(mikro.ButtonProject)], 3)
+			go blinkButton(lightUpdates, mikro.ButtonProject, buttonLEDs[int(mikro.ButtonProject)], 3)
 			var activePads [16]bool
 			var activeButtons [40]bool
 			var prevEncoder uint8
@@ -100,8 +133,12 @@ func main() {
 
 				switch msg.Action() {
 				case mikro.PadActionPressed:
-					activeColor, _ := parseColor(cfg.PadColorActive)
-					activeLevel, _ := parseColorLevel(cfg.PadLevelActive)
+					if activePads[idx] {
+						return
+					}
+					runtimeMu.RLock()
+					rt := runtime
+					runtimeMu.RUnlock()
 					vel := scaleVelocity(msg.Velocity())
 					data := noteOn(cfg.Channel, note, vel)
 					if err := midiPort.SendData(data); err != nil {
@@ -113,13 +150,16 @@ func main() {
 
 					queueLightUpdate(lightUpdates, func(lights mikro.Lights) mikro.Lights {
 						lights.Pads[idx] = mikro.ColoredLight{
-							Level: activeLevel,
-							Color: activeColor,
+							Level: rt.activeLevel,
+							Color: rt.activeColor,
 						}
 						return lights
 					})
 
 				case mikro.PadActionReleased:
+					if !activePads[idx] {
+						return
+					}
 					data := noteOff(cfg.Channel, note)
 					if err := midiPort.SendData(data); err != nil {
 						return
@@ -128,8 +168,11 @@ func main() {
 
 					gui.PadOff(idx)
 
-					idleLevel := parsePadLevelIdle(cfg)
-					idleColor := parsePadColor(cfg, idx)
+					runtimeMu.RLock()
+					rt := runtime
+					runtimeMu.RUnlock()
+					idleLevel := rt.padIdleLevel
+					idleColor := rt.padIdleColors[idx]
 					queueLightUpdate(lightUpdates, func(lights mikro.Lights) mikro.Lights {
 						lights.Pads[idx] = mikro.ColoredLight{
 							Level: idleLevel,
@@ -141,11 +184,14 @@ func main() {
 			})
 
 			mk3.SetOnButtonFunc(func(msg mikro.ButtonMessage) {
-				pressed := map[mikro.Button]bool{}
+				var pressed [40]bool
 				for _, btn := range msg.PressedButtons() {
-					pressed[btn] = true
 					idx := int(btn)
-					if idx < 0 || idx >= len(activeButtons) || activeButtons[idx] {
+					if idx < 0 || idx >= len(pressed) {
+						continue
+					}
+					pressed[idx] = true
+					if activeButtons[idx] {
 						continue
 					}
 					activeButtons[idx] = true
@@ -178,7 +224,7 @@ func main() {
 
 				for idx, active := range activeButtons {
 					btn := mikro.Button(idx)
-					if !active || pressed[btn] {
+					if !active || pressed[idx] {
 						continue
 					}
 					activeButtons[idx] = false
@@ -190,7 +236,10 @@ func main() {
 					}
 					gui.ButtonOff(btn, cfg.ButtonNotes[idx], cfg.ButtonCCs[idx])
 					if cfg.ButtonLEDEnabled && idx < 39 {
-						idle := parseButtonLED(cfg, idx)
+						runtimeMu.RLock()
+						rt := runtime
+						runtimeMu.RUnlock()
+						idle := rt.buttonLEDs[idx]
 						queueLightUpdate(lightUpdates, func(lights mikro.Lights) mikro.Lights {
 							lights.Buttons[idx] = idle
 							return lights
@@ -220,8 +269,10 @@ func main() {
 					prevEncoder = encoder
 				}
 				if strip1 != prevStrip1 {
-					activeColor, _ := parseColor(cfg.PadColorActive)
-					value := scaleTouchStripValue(strip1, cfg.TouchStripMin, cfg.TouchStripMax)
+					runtimeMu.RLock()
+					rt := runtime
+					runtimeMu.RUnlock()
+					value := scaleTouchStripValue(strip1, cfg.TouchStripMin, cfg.TouchStripMax, cfg.TouchStripDeadzone)
 					send := true
 					if strip1 == 0 && cfg.TouchStripRelease == "hold" {
 						send = false
@@ -232,15 +283,17 @@ func main() {
 					if send {
 						_ = midiPort.SendData(controlChange(cfg.Channel, cfg.TouchStripCC, value))
 						queueLightUpdate(lightUpdates, func(lights mikro.Lights) mikro.Lights {
-							return touchStripLights(lights, value, activeColor)
+							return touchStripLights(lights, value, rt.activeColor)
 						})
 						gui.TouchStrip(cfg.TouchStripCC, value, 1)
 					}
 					prevStrip1 = strip1
 				}
 				if strip2 != prevStrip2 {
-					activeColor, _ := parseColor(cfg.PadColorActive)
-					value := scaleTouchStripValue(strip2, cfg.TouchStripMin, cfg.TouchStripMax)
+					runtimeMu.RLock()
+					rt := runtime
+					runtimeMu.RUnlock()
+					value := scaleTouchStripValue(strip2, cfg.TouchStripMin, cfg.TouchStripMax, cfg.TouchStripDeadzone)
 					send := true
 					if strip2 == 0 && cfg.TouchStripRelease == "hold" {
 						send = false
@@ -251,7 +304,7 @@ func main() {
 					if send {
 						_ = midiPort.SendData(controlChange(cfg.Channel, cfg.TouchStripCC2, value))
 						queueLightUpdate(lightUpdates, func(lights mikro.Lights) mikro.Lights {
-							return touchStripLights(lights, value, activeColor)
+							return touchStripLights(lights, value, rt.activeColor)
 						})
 						gui.TouchStrip(cfg.TouchStripCC2, value, 2)
 					}
@@ -319,21 +372,21 @@ func startLightWorker(ctx context.Context, mk3 *mikro.Mk3) chan func(mikro.Light
 	updates := make(chan func(mikro.Lights) mikro.Lights, 128)
 	go func() {
 		lights := mk3.Lights()
+		dirty := false
+		ticker := time.NewTicker(16 * time.Millisecond)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case update := <-updates:
 				lights = update(lights)
-				draining := true
-				for draining {
-					select {
-					case update := <-updates:
-						lights = update(lights)
-					default:
-						draining = false
-					}
+				dirty = true
+			case <-ticker.C:
+				if !dirty {
+					continue
 				}
+				dirty = false
 				if err := mk3.SetLights(lights); err != nil {
 					log.Printf("SetLights error: %v", err)
 				}
@@ -396,26 +449,22 @@ func defaultLights(lights mikro.Lights, cfg Config, padColors [16]mikro.Color, b
 	return lights
 }
 
-func blinkButton(mk3 *mikro.Mk3, btn mikro.Button, idle mikro.Intensity, count int) {
+func blinkButton(updates chan func(mikro.Lights) mikro.Lights, btn mikro.Button, idle mikro.Intensity, count int) {
 	idx := int(btn)
 	if idx < 0 || idx >= 39 {
 		return
 	}
 	for i := 0; i < count; i++ {
-		lights := mk3.Lights()
-		lights.Buttons[idx] = mikro.IntensityHigh
-		if err := mk3.SetLights(lights); err != nil {
-			log.Printf("SetLights error: %v", err)
-			return
-		}
+		queueLightUpdate(updates, func(lights mikro.Lights) mikro.Lights {
+			lights.Buttons[idx] = mikro.IntensityHigh
+			return lights
+		})
 		time.Sleep(150 * time.Millisecond)
 
-		lights = mk3.Lights()
-		lights.Buttons[idx] = idle
-		if err := mk3.SetLights(lights); err != nil {
-			log.Printf("SetLights error: %v", err)
-			return
-		}
+		queueLightUpdate(updates, func(lights mikro.Lights) mikro.Lights {
+			lights.Buttons[idx] = idle
+			return lights
+		})
 		time.Sleep(150 * time.Millisecond)
 	}
 }
