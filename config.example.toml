@@ -13,7 +13,17 @@ channel = 9
 pad_color_active = "cyan"
 
 # Pad LED color when idle
+# Used as a fallback when all pad_colors are off.
 pad_color_idle = "off"
+
+# Default idle LED color for each pad.
+# Same layout/indexing as pad_notes.
+pad_colors = [
+  "off", "off", "off", "off",
+  "off", "off", "off", "off",
+  "off", "off", "off", "off",
+  "off", "off", "off", "off",
+]
 
 # MIDI note for each pad (0-127)
 # Layout matches physical grid:
@@ -27,3 +37,60 @@ pad_notes = [
   44, 45, 46, 47,
   48, 49, 50, 51,
 ]
+
+# Buttons can send MIDI notes, MIDI CCs, or both.
+send_button_notes = true
+send_button_ccs = true
+
+# Play, Restart, and Stop also send MIDI realtime transport messages.
+enable_transport = true
+
+# Button LEDs light while buttons are pressed.
+button_led_enabled = true
+
+# Button mappings are indexed in the library's button order:
+# Project, Favorites, Browser, Volume, Swing, Tempo, Plugin, Sampling,
+# ArrowLeft, ArrowRight, Pitch, Mod, Perform, Notes, Group, Auto, Lock,
+# NoteRepeat, Restart, Erase, Tap, Follow, Play, Rec, Stop, Shift,
+# FixedVel, PadMode, Keyboard, Chords, Step, Scene, Pattern, Events,
+# Variation, Duplicate, Select, Solo, Mute, Encoder.
+button_notes = [
+  52, 53, 54, 55, 56, 57, 58, 59,
+  60, 61, 62, 63, 64, 65, 66, 67,
+  68, 69, 70, 71, 72, 73, 74, 75,
+  76, 77, 78, 79, 80, 81, 82, 83,
+  84, 85, 86, 87, 88, 89, 90, 91,
+]
+
+button_ccs = [
+  20, 21, 22, 23, 24, 25, 26, 27,
+  28, 29, 30, 31, 32, 33, 34, 35,
+  36, 37, 38, 39, 40, 41, 42, 43,
+  44, 45, 46, 47, 48, 49, 50, 51,
+  52, 53, 54, 55, 56, 57, 58, 59,
+]
+
+# Button LEDs are not RGB on this device. They support brightness only.
+# Options: off, low, medium, high
+button_leds = [
+  "off", "off", "off", "off", "off", "off", "off", "off",
+  "off", "off", "off", "off", "off", "off", "off", "off",
+  "off", "off", "off", "off", "off", "off", "off", "off",
+  "off", "off", "off", "off", "off", "off", "off", "off",
+  "off", "off", "off", "off", "off", "off", "off", "off",
+]
+
+# Encoder sends relative CC values: 1-63 clockwise, 127-65 counter-clockwise.
+encoder_cc = 16
+
+# Touch strip sends absolute CC values scaled to 0-127.
+touch_strip_cc = 17
+touch_strip_cc_2 = 18
+
+# Raw touch strip calibration. The Mikro appears to top out around 200.
+touch_strip_min = 0
+touch_strip_max = 200
+
+# What to send when the strip reports 0 after release:
+# hold = send nothing, zero = send 0, center = send 64
+touch_strip_release = "hold"

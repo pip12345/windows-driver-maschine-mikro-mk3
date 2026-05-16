@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"essaim.dev/mikro"
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
@@ -43,15 +44,22 @@ type GUI struct {
 
 	pads      [16]*canvas.Rectangle
 	padLabels [16]*canvas.Text
-	statusLbl *widget.Label
-	logLbl    *widget.Label
+	buttons   [40]*canvas.Rectangle
+
+	encoderLbl *widget.Label
+	stripLbl   *widget.Label
+	statusLbl  *widget.Label
+	logLbl     *widget.Label
 
 	mu       sync.Mutex
 	logLines []string
 
-	idleColor   color.Color
-	activeColor color.Color
+	padIdleColors [16]color.Color
+	activeColor   color.Color
 }
+
+var controlIdleColor = color.NRGBA{R: 45, G: 45, B: 50, A: 255}
+var controlActiveColor = color.NRGBA{R: 0, G: 120, B: 255, A: 255}
 
 func NewGUI(cfg Config) *GUI {
 	g := &GUI{}
@@ -60,14 +68,16 @@ func NewGUI(cfg Config) *GUI {
 	if g.activeColor == nil {
 		g.activeColor = guiColors["cyan"]
 	}
-	g.idleColor = guiColors[cfg.PadColorIdle]
-	if g.idleColor == nil || cfg.PadColorIdle == "off" {
-		g.idleColor = dimColor
+	for idx, padColor := range cfg.PadColors {
+		g.padIdleColors[idx] = guiColors[padColor]
+		if g.padIdleColors[idx] == nil || padColor == "off" {
+			g.padIdleColors[idx] = dimColor
+		}
 	}
 
 	g.app = app.New()
 	g.window = g.app.NewWindow("Maschine Mikro MK3 MIDI")
-	g.window.Resize(fyne.NewSize(420, 520))
+	g.window.Resize(fyne.NewSize(900, 780))
 	g.window.SetFixedSize(true)
 
 	g.statusLbl = widget.NewLabel("Starting...")
@@ -83,7 +93,7 @@ func NewGUI(cfg Config) *GUI {
 		for col := 0; col < 4; col++ {
 			idx := row*4 + col
 
-			rect := canvas.NewRectangle(g.idleColor)
+			rect := canvas.NewRectangle(g.padIdleColors[idx])
 			rect.SetMinSize(fyne.NewSize(80, 80))
 			rect.CornerRadius = 8
 
@@ -99,13 +109,32 @@ func NewGUI(cfg Config) *GUI {
 		}
 	}
 
-	content := container.NewVBox(
+	buttonGrid := container.NewGridWithColumns(4)
+	for idx := 0; idx < len(g.buttons); idx++ {
+		rect := canvas.NewRectangle(controlIdleColor)
+		rect.SetMinSize(fyne.NewSize(120, 30))
+		rect.CornerRadius = 5
+
+		label := canvas.NewText(fmt.Sprintf("%s N%d CC%d", mikro.Button(idx), cfg.ButtonNotes[idx], cfg.ButtonCCs[idx]), color.White)
+		label.Alignment = fyne.TextAlignCenter
+		label.TextSize = 10
+
+		buttonGrid.Add(container.NewStack(rect, container.NewCenter(label)))
+		g.buttons[idx] = rect
+	}
+
+	g.encoderLbl = widget.NewLabel(fmt.Sprintf("Encoder: CC%d", cfg.EncoderCC))
+	g.stripLbl = widget.NewLabel(fmt.Sprintf("Touch strip: CC%d / CC%d", cfg.TouchStripCC, cfg.TouchStripCC2))
+
+	top := container.NewVBox(
 		g.statusLbl,
 		widget.NewSeparator(),
-		container.NewCenter(grid),
+		container.NewCenter(container.NewHBox(buttonGrid, grid)),
 		widget.NewSeparator(),
-		g.logLbl,
+		container.NewGridWithColumns(2, g.encoderLbl, g.stripLbl),
+		widget.NewSeparator(),
 	)
+	content := container.NewBorder(top, nil, nil, nil, container.NewVScroll(g.logLbl))
 
 	g.window.SetContent(content)
 	return g
@@ -133,9 +162,47 @@ func (g *GUI) PadOff(idx int) {
 		return
 	}
 	fyne.Do(func() {
-		g.pads[idx].FillColor = g.idleColor
+		g.pads[idx].FillColor = g.padIdleColors[idx]
 		g.pads[idx].Refresh()
 		g.addLogLocked(fmt.Sprintf("Pad %2d OFF", idx+1))
+	})
+}
+
+func (g *GUI) ButtonOn(btn mikro.Button, note, cc uint8) {
+	idx := int(btn)
+	if idx < 0 || idx >= len(g.buttons) {
+		return
+	}
+	fyne.Do(func() {
+		g.buttons[idx].FillColor = controlActiveColor
+		g.buttons[idx].Refresh()
+		g.addLogLocked(fmt.Sprintf("Button %-10s ON  note %3d cc %3d", btn, note, cc))
+	})
+}
+
+func (g *GUI) ButtonOff(btn mikro.Button, note, cc uint8) {
+	idx := int(btn)
+	if idx < 0 || idx >= len(g.buttons) {
+		return
+	}
+	fyne.Do(func() {
+		g.buttons[idx].FillColor = controlIdleColor
+		g.buttons[idx].Refresh()
+		g.addLogLocked(fmt.Sprintf("Button %-10s OFF note %3d cc %3d", btn, note, cc))
+	})
+}
+
+func (g *GUI) EncoderTurn(cc, value uint8, delta int) {
+	fyne.Do(func() {
+		g.encoderLbl.SetText(fmt.Sprintf("Encoder: CC%d value %d delta %+d", cc, value, delta))
+		g.addLogLocked(fmt.Sprintf("Encoder CC %3d value %3d delta %+d", cc, value, delta))
+	})
+}
+
+func (g *GUI) TouchStrip(cc, value uint8, strip int) {
+	fyne.Do(func() {
+		g.stripLbl.SetText(fmt.Sprintf("Touch strip %d: CC%d value %d", strip, cc, value))
+		g.addLogLocked(fmt.Sprintf("Strip %d CC %3d value %3d", strip, cc, value))
 	})
 }
 
@@ -143,9 +210,9 @@ func (g *GUI) addLogLocked(line string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	g.logLines = append(g.logLines, line)
-	if len(g.logLines) > 6 {
-		g.logLines = g.logLines[len(g.logLines)-6:]
+	g.logLines = append([]string{line}, g.logLines...)
+	if len(g.logLines) > 30 {
+		g.logLines = g.logLines[:30]
 	}
 	g.logLbl.SetText(strings.Join(g.logLines, "\n") + "\n")
 }

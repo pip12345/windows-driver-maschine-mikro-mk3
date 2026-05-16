@@ -9,11 +9,25 @@ import (
 )
 
 type Config struct {
-	PortName       string    `toml:"port_name"`
-	Channel        uint8     `toml:"channel"`
-	PadNotes       [16]uint8 `toml:"pad_notes"`
-	PadColorActive string    `toml:"pad_color_active"`
-	PadColorIdle   string    `toml:"pad_color_idle"`
+	PortName          string     `toml:"port_name"`
+	Channel           uint8      `toml:"channel"`
+	PadNotes          [16]uint8  `toml:"pad_notes"`
+	PadColorActive    string     `toml:"pad_color_active"`
+	PadColorIdle      string     `toml:"pad_color_idle"`
+	PadColors         [16]string `toml:"pad_colors"`
+	SendButtonNotes   bool       `toml:"send_button_notes"`
+	SendButtonCCs     bool       `toml:"send_button_ccs"`
+	ButtonNotes       [40]uint8  `toml:"button_notes"`
+	ButtonCCs         [40]uint8  `toml:"button_ccs"`
+	ButtonLEDs        [40]string `toml:"button_leds"`
+	EncoderCC         uint8      `toml:"encoder_cc"`
+	TouchStripCC      uint8      `toml:"touch_strip_cc"`
+	TouchStripCC2     uint8      `toml:"touch_strip_cc_2"`
+	TouchStripRelease string     `toml:"touch_strip_release"`
+	TouchStripMin     uint8      `toml:"touch_strip_min"`
+	TouchStripMax     uint8      `toml:"touch_strip_max"`
+	EnableTransport   bool       `toml:"enable_transport"`
+	ButtonLEDEnabled  bool       `toml:"button_led_enabled"`
 }
 
 // Available color names -> mikro.Color
@@ -38,6 +52,13 @@ var colorNames = map[string]mikro.Color{
 	"white":        mikro.ColorWhite,
 }
 
+var intensityNames = map[string]mikro.Intensity{
+	"off":    mikro.IntensityOff,
+	"low":    mikro.IntensityLow,
+	"medium": mikro.IntensityMedium,
+	"high":   mikro.IntensityHigh,
+}
+
 func parseColor(name string) (mikro.Color, error) {
 	c, ok := colorNames[name]
 	if !ok {
@@ -50,13 +71,51 @@ func parseColor(name string) (mikro.Color, error) {
 	return c, nil
 }
 
+func parseIntensity(name string) (mikro.Intensity, error) {
+	i, ok := intensityNames[name]
+	if !ok {
+		return 0, fmt.Errorf("unknown intensity %q (valid: off, low, medium, high)", name)
+	}
+	return i, nil
+}
+
+func defaultPadColors() [16]string {
+	colors := [16]string{}
+	for i := range colors {
+		colors[i] = "off"
+	}
+	return colors
+}
+
+func defaultButtonLEDs() [40]string {
+	leds := [40]string{}
+	for i := range leds {
+		leds[i] = "off"
+	}
+	return leds
+}
+
 func defaultConfig() Config {
 	return Config{
-		PortName:       "Maschine Mikro MK3",
-		Channel:        9, // MIDI channel 10 (0-indexed)
-		PadNotes:       defaultPadNotes,
-		PadColorActive: "cyan",
-		PadColorIdle:   "off",
+		PortName:          "Maschine Mikro MK3",
+		Channel:           9, // MIDI channel 10 (0-indexed)
+		PadNotes:          defaultPadNotes,
+		PadColorActive:    "cyan",
+		PadColorIdle:      "off",
+		PadColors:         defaultPadColors(),
+		SendButtonNotes:   true,
+		SendButtonCCs:     true,
+		ButtonNotes:       defaultButtonNotes,
+		ButtonCCs:         defaultButtonCCs,
+		ButtonLEDs:        defaultButtonLEDs(),
+		EncoderCC:         16,
+		TouchStripCC:      17,
+		TouchStripCC2:     18,
+		TouchStripRelease: "hold",
+		TouchStripMin:     0,
+		TouchStripMax:     200,
+		EnableTransport:   true,
+		ButtonLEDEnabled:  true,
 	}
 }
 
@@ -74,6 +133,20 @@ func loadConfig(path string) (Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("parsing config: %w", err)
 	}
+	if cfg.PadColorIdle != "off" {
+		allPadColorsOff := true
+		for _, color := range cfg.PadColors {
+			if color != "off" {
+				allPadColorsOff = false
+				break
+			}
+		}
+		if allPadColorsOff {
+			for i := range cfg.PadColors {
+				cfg.PadColors[i] = cfg.PadColorIdle
+			}
+		}
+	}
 
 	if cfg.Channel > 15 {
 		return cfg, fmt.Errorf("channel must be 0-15, got %d", cfg.Channel)
@@ -83,12 +156,47 @@ func loadConfig(path string) (Config, error) {
 			return cfg, fmt.Errorf("pad_notes[%d] must be 0-127, got %d", i, note)
 		}
 	}
+	for i, note := range cfg.ButtonNotes {
+		if note > 127 {
+			return cfg, fmt.Errorf("button_notes[%d] must be 0-127, got %d", i, note)
+		}
+	}
+	for i, cc := range cfg.ButtonCCs {
+		if cc > 127 {
+			return cfg, fmt.Errorf("button_ccs[%d] must be 0-127, got %d", i, cc)
+		}
+	}
+	if cfg.EncoderCC > 127 {
+		return cfg, fmt.Errorf("encoder_cc must be 0-127, got %d", cfg.EncoderCC)
+	}
+	if cfg.TouchStripCC > 127 {
+		return cfg, fmt.Errorf("touch_strip_cc must be 0-127, got %d", cfg.TouchStripCC)
+	}
+	if cfg.TouchStripCC2 > 127 {
+		return cfg, fmt.Errorf("touch_strip_cc_2 must be 0-127, got %d", cfg.TouchStripCC2)
+	}
+	if cfg.TouchStripRelease != "hold" && cfg.TouchStripRelease != "zero" && cfg.TouchStripRelease != "center" {
+		return cfg, fmt.Errorf("touch_strip_release must be hold, zero, or center, got %q", cfg.TouchStripRelease)
+	}
+	if cfg.TouchStripMin >= cfg.TouchStripMax {
+		return cfg, fmt.Errorf("touch_strip_min must be less than touch_strip_max")
+	}
 
 	if _, err := parseColor(cfg.PadColorActive); err != nil {
 		return cfg, fmt.Errorf("pad_color_active: %w", err)
 	}
 	if _, err := parseColor(cfg.PadColorIdle); err != nil {
 		return cfg, fmt.Errorf("pad_color_idle: %w", err)
+	}
+	for i, color := range cfg.PadColors {
+		if _, err := parseColor(color); err != nil {
+			return cfg, fmt.Errorf("pad_colors[%d]: %w", i, err)
+		}
+	}
+	for i, intensity := range cfg.ButtonLEDs {
+		if _, err := parseIntensity(intensity); err != nil {
+			return cfg, fmt.Errorf("button_leds[%d]: %w", i, err)
+		}
 	}
 
 	return cfg, nil

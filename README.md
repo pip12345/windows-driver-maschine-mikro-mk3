@@ -4,10 +4,7 @@ Lightweight MIDI driver for the Native Instruments Maschine Mikro MK3.
 No NI software required. Talks directly to the hardware over USB HID and exposes
 a virtual MIDI port that any DAW can use.
 
-Mostly AI slop, but works and gets past the hardware DRM.
-
-Only the pads are supported right now. Buttons, encoder input, LEDs, screens,
-transport controls, and other Maschine features are not translated to MIDI yet.
+Mostly AI slop, but works and gets past the hardware DRM
 
 ## Prerequisites
 
@@ -26,6 +23,10 @@ That's it. The app will:
 - Connect to your Maschine Mikro MK3 via USB
 - Create a virtual MIDI port called "Maschine Mikro MK3"
 - Forward pad hits as MIDI notes
+- Forward button presses as MIDI notes and CCs
+- Forward Play, Restart, and Stop as MIDI transport Start, Continue, and Stop
+- Forward encoder turns as relative CC and touch strip movement as CC
+- Keep retrying if the device is unplugged and plugged back in
 
 Open your DAW and select "Maschine Mikro MK3" as a MIDI input device.
 
@@ -35,6 +36,12 @@ Copy `config.example.toml` to `config.toml` to customize:
 - MIDI port name
 - MIDI channel (default: 10 / drums)
 - Pad-to-note mapping (default: GM drum map)
+- Per-pad default LED colors
+- Button note and CC mappings
+- Per-button default LED brightness (`off`, `low`, `medium`, or `high`)
+- Encoder and touch strip CC numbers
+- Touch strip raw min/max calibration
+- Touch strip release behavior (`hold`, `zero`, or `center`)
 
 ## Building from Source
 
