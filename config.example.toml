@@ -12,6 +12,11 @@ channel = 9
 #          mint, cyan, turquoise, blue, plum, violet, purple, magenta, fuchsia, white
 pad_color_active = "cyan"
 
+# Pad LED brightness levels.
+# Options: low, medium, high, faded
+pad_level_active = "high"
+pad_level_idle = "low"
+
 # Pad LED color when idle
 # Used as a fallback when all pad_colors are off.
 pad_color_idle = "off"

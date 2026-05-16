@@ -37,11 +37,21 @@ Copy `config.example.toml` to `config.toml` to customize:
 - MIDI channel (default: 10 / drums)
 - Pad-to-note mapping (default: GM drum map)
 - Per-pad default LED colors
+- Global active/idle pad LED brightness
 - Button note and CC mappings
 - Per-button default LED brightness (`off`, `low`, `medium`, or `high`)
 - Encoder and touch strip CC numbers
 - Touch strip raw min/max calibration
 - Touch strip release behavior (`hold`, `zero`, or `center`)
+
+You can also edit configuration inside the app:
+- Click a pad in the GUI to edit that pad's note and idle LED color.
+- Right-click a pad to set only its idle LED color.
+- Click a button in the GUI to edit that button's note, CC, and default LED brightness.
+- Right-click a button to set only its default LED brightness.
+- Click `Config` to edit global settings.
+
+The app writes changes to `config.toml` automatically when you save a dialog.
 
 ## Building from Source
 

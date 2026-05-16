@@ -14,6 +14,8 @@ type Config struct {
 	PadNotes          [16]uint8  `toml:"pad_notes"`
 	PadColorActive    string     `toml:"pad_color_active"`
 	PadColorIdle      string     `toml:"pad_color_idle"`
+	PadLevelActive    string     `toml:"pad_level_active"`
+	PadLevelIdle      string     `toml:"pad_level_idle"`
 	PadColors         [16]string `toml:"pad_colors"`
 	SendButtonNotes   bool       `toml:"send_button_notes"`
 	SendButtonCCs     bool       `toml:"send_button_ccs"`
@@ -59,6 +61,13 @@ var intensityNames = map[string]mikro.Intensity{
 	"high":   mikro.IntensityHigh,
 }
 
+var colorLevelNames = map[string]mikro.ColorLevel{
+	"low":    mikro.ColorLevelLow,
+	"medium": mikro.ColorLevelMedium,
+	"high":   mikro.ColorLevelHigh,
+	"faded":  mikro.ColorLevelFaded,
+}
+
 func parseColor(name string) (mikro.Color, error) {
 	c, ok := colorNames[name]
 	if !ok {
@@ -77,6 +86,14 @@ func parseIntensity(name string) (mikro.Intensity, error) {
 		return 0, fmt.Errorf("unknown intensity %q (valid: off, low, medium, high)", name)
 	}
 	return i, nil
+}
+
+func parseColorLevel(name string) (mikro.ColorLevel, error) {
+	level, ok := colorLevelNames[name]
+	if !ok {
+		return 0, fmt.Errorf("unknown color level %q (valid: low, medium, high, faded)", name)
+	}
+	return level, nil
 }
 
 func defaultPadColors() [16]string {
@@ -102,6 +119,8 @@ func defaultConfig() Config {
 		PadNotes:          defaultPadNotes,
 		PadColorActive:    "cyan",
 		PadColorIdle:      "off",
+		PadLevelActive:    "high",
+		PadLevelIdle:      "low",
 		PadColors:         defaultPadColors(),
 		SendButtonNotes:   true,
 		SendButtonCCs:     true,
@@ -188,6 +207,12 @@ func loadConfig(path string) (Config, error) {
 	if _, err := parseColor(cfg.PadColorIdle); err != nil {
 		return cfg, fmt.Errorf("pad_color_idle: %w", err)
 	}
+	if _, err := parseColorLevel(cfg.PadLevelActive); err != nil {
+		return cfg, fmt.Errorf("pad_level_active: %w", err)
+	}
+	if _, err := parseColorLevel(cfg.PadLevelIdle); err != nil {
+		return cfg, fmt.Errorf("pad_level_idle: %w", err)
+	}
 	for i, color := range cfg.PadColors {
 		if _, err := parseColor(color); err != nil {
 			return cfg, fmt.Errorf("pad_colors[%d]: %w", i, err)
@@ -200,4 +225,17 @@ func loadConfig(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func saveConfig(path string, cfg Config) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("creating config: %w", err)
+	}
+	defer f.Close()
+
+	if err := toml.NewEncoder(f).Encode(cfg); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+	return nil
 }

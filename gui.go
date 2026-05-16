@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -11,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -45,6 +47,11 @@ type GUI struct {
 	pads      [16]*canvas.Rectangle
 	padLabels [16]*canvas.Text
 	buttons   [40]*canvas.Rectangle
+	buttonLbl [40]*canvas.Text
+
+	cfg           *Config
+	configPath    string
+	onConfigSaved func(Config)
 
 	encoderLbl *widget.Label
 	stripLbl   *widget.Label
@@ -53,16 +60,85 @@ type GUI struct {
 
 	mu       sync.Mutex
 	logLines []string
+	logCount int
 
 	padIdleColors [16]color.Color
 	activeColor   color.Color
 }
 
 var controlIdleColor = color.NRGBA{R: 45, G: 45, B: 50, A: 255}
+var controlLowColor = color.NRGBA{R: 55, G: 65, B: 80, A: 255}
+var controlMediumColor = color.NRGBA{R: 65, G: 90, B: 120, A: 255}
+var controlHighColor = color.NRGBA{R: 75, G: 115, B: 165, A: 255}
 var controlActiveColor = color.NRGBA{R: 0, G: 120, B: 255, A: 255}
 
-func NewGUI(cfg Config) *GUI {
-	g := &GUI{}
+type tappableStack struct {
+	widget.BaseWidget
+	onTapped          func()
+	onSecondaryTapped func(*fyne.PointEvent)
+	objects           []fyne.CanvasObject
+}
+
+func newTappableStack(onTapped func(), onSecondaryTapped func(*fyne.PointEvent), objects ...fyne.CanvasObject) *tappableStack {
+	t := &tappableStack{onTapped: onTapped, onSecondaryTapped: onSecondaryTapped, objects: objects}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+func (t *tappableStack) Tapped(*fyne.PointEvent) {
+	if t.onTapped != nil {
+		t.onTapped()
+	}
+}
+
+func (t *tappableStack) TappedSecondary(e *fyne.PointEvent) {
+	if t.onSecondaryTapped != nil {
+		t.onSecondaryTapped(e)
+	}
+}
+
+func (t *tappableStack) CreateRenderer() fyne.WidgetRenderer {
+	return &tappableStackRenderer{objects: t.objects}
+}
+
+type tappableStackRenderer struct {
+	objects []fyne.CanvasObject
+}
+
+func (r *tappableStackRenderer) Layout(size fyne.Size) {
+	for _, obj := range r.objects {
+		obj.Resize(size)
+	}
+}
+
+func (r *tappableStackRenderer) MinSize() fyne.Size {
+	min := fyne.NewSize(0, 0)
+	for _, obj := range r.objects {
+		objMin := obj.MinSize()
+		if objMin.Width > min.Width {
+			min.Width = objMin.Width
+		}
+		if objMin.Height > min.Height {
+			min.Height = objMin.Height
+		}
+	}
+	return min
+}
+
+func (r *tappableStackRenderer) Refresh() {
+	for _, obj := range r.objects {
+		obj.Refresh()
+	}
+}
+
+func (r *tappableStackRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *tappableStackRenderer) Destroy() {}
+
+func NewGUI(cfg *Config) *GUI {
+	g := &GUI{cfg: cfg, configPath: "config.toml"}
 
 	g.activeColor = guiColors[cfg.PadColorActive]
 	if g.activeColor == nil {
@@ -92,42 +168,58 @@ func NewGUI(cfg Config) *GUI {
 	for row := 3; row >= 0; row-- {
 		for col := 0; col < 4; col++ {
 			idx := row*4 + col
+			padIdx := idx
 
 			rect := canvas.NewRectangle(g.padIdleColors[idx])
 			rect.SetMinSize(fyne.NewSize(80, 80))
 			rect.CornerRadius = 8
 
-			label := canvas.NewText(fmt.Sprintf("%d (%d)", idx+1, cfg.PadNotes[idx]), color.White)
+			label := canvas.NewText(g.padLabel(padIdx), color.White)
 			label.Alignment = fyne.TextAlignCenter
+			label.TextStyle = fyne.TextStyle{Bold: true}
 			label.TextSize = 12
 
-			padContainer := container.NewStack(rect, container.NewCenter(label))
+			padContainer := newTappableStack(
+				func() { g.showPadConfig(padIdx) },
+				func(e *fyne.PointEvent) { g.showPadColorMenu(padIdx, e.AbsolutePosition) },
+				rect,
+				container.NewCenter(label),
+			)
 			grid.Add(padContainer)
 
-			g.pads[idx] = rect
-			g.padLabels[idx] = label
+			g.pads[padIdx] = rect
+			g.padLabels[padIdx] = label
 		}
 	}
 
 	buttonGrid := container.NewGridWithColumns(4)
 	for idx := 0; idx < len(g.buttons); idx++ {
-		rect := canvas.NewRectangle(controlIdleColor)
+		buttonIdx := idx
+		rect := canvas.NewRectangle(g.buttonIdleColor(buttonIdx))
 		rect.SetMinSize(fyne.NewSize(120, 30))
 		rect.CornerRadius = 5
 
-		label := canvas.NewText(fmt.Sprintf("%s N%d CC%d", mikro.Button(idx), cfg.ButtonNotes[idx], cfg.ButtonCCs[idx]), color.White)
+		label := canvas.NewText(g.buttonLabel(buttonIdx), color.White)
 		label.Alignment = fyne.TextAlignCenter
+		label.TextStyle = fyne.TextStyle{Bold: true}
 		label.TextSize = 10
 
-		buttonGrid.Add(container.NewStack(rect, container.NewCenter(label)))
-		g.buttons[idx] = rect
+		buttonGrid.Add(newTappableStack(
+			func() { g.showButtonConfig(buttonIdx) },
+			func(e *fyne.PointEvent) { g.showButtonLEDMenu(buttonIdx, e.AbsolutePosition) },
+			rect,
+			container.NewCenter(label),
+		))
+		g.buttons[buttonIdx] = rect
+		g.buttonLbl[buttonIdx] = label
 	}
 
 	g.encoderLbl = widget.NewLabel(fmt.Sprintf("Encoder: CC%d", cfg.EncoderCC))
 	g.stripLbl = widget.NewLabel(fmt.Sprintf("Touch strip: CC%d / CC%d", cfg.TouchStripCC, cfg.TouchStripCC2))
+	configButton := widget.NewButton("Config", g.showGlobalConfig)
 
 	top := container.NewVBox(
-		g.statusLbl,
+		container.NewBorder(nil, nil, nil, configButton, g.statusLbl),
 		widget.NewSeparator(),
 		container.NewCenter(container.NewHBox(buttonGrid, grid)),
 		widget.NewSeparator(),
@@ -138,6 +230,287 @@ func NewGUI(cfg Config) *GUI {
 
 	g.window.SetContent(content)
 	return g
+}
+
+func (g *GUI) padLabel(idx int) string {
+	return fmt.Sprintf("%d N%d %s", idx+1, g.cfg.PadNotes[idx], g.cfg.PadColors[idx])
+}
+
+func (g *GUI) buttonLabel(idx int) string {
+	return fmt.Sprintf("%s N%d CC%d", mikro.Button(idx), g.cfg.ButtonNotes[idx], g.cfg.ButtonCCs[idx])
+}
+
+func (g *GUI) buttonIdleColor(idx int) color.Color {
+	switch g.cfg.ButtonLEDs[idx] {
+	case "low":
+		return controlLowColor
+	case "medium":
+		return controlMediumColor
+	case "high":
+		return controlHighColor
+	default:
+		return controlIdleColor
+	}
+}
+
+func (g *GUI) refreshConfigLabels() {
+	for idx := range g.padLabels {
+		if g.padLabels[idx] != nil {
+			g.padLabels[idx].Text = g.padLabel(idx)
+			g.padLabels[idx].Refresh()
+		}
+		g.padIdleColors[idx] = guiColors[g.cfg.PadColors[idx]]
+		if g.padIdleColors[idx] == nil || g.cfg.PadColors[idx] == "off" {
+			g.padIdleColors[idx] = dimColor
+		}
+		if g.pads[idx] != nil {
+			g.pads[idx].FillColor = g.padIdleColors[idx]
+			g.pads[idx].Refresh()
+		}
+	}
+	for idx := range g.buttonLbl {
+		if g.buttonLbl[idx] != nil {
+			g.buttonLbl[idx].Text = g.buttonLabel(idx)
+			g.buttonLbl[idx].Refresh()
+		}
+		if g.buttons[idx] != nil {
+			g.buttons[idx].FillColor = g.buttonIdleColor(idx)
+			g.buttons[idx].Refresh()
+		}
+	}
+	g.activeColor = guiColors[g.cfg.PadColorActive]
+	if g.activeColor == nil {
+		g.activeColor = guiColors["cyan"]
+	}
+	g.encoderLbl.SetText(fmt.Sprintf("Encoder: CC%d", g.cfg.EncoderCC))
+	g.stripLbl.SetText(fmt.Sprintf("Touch strip: CC%d / CC%d", g.cfg.TouchStripCC, g.cfg.TouchStripCC2))
+}
+
+func (g *GUI) saveConfig() bool {
+	if err := saveConfig(g.configPath, *g.cfg); err != nil {
+		dialog.ShowError(err, g.window)
+		return false
+	}
+	g.refreshConfigLabels()
+	if g.onConfigSaved != nil {
+		g.onConfigSaved(*g.cfg)
+	}
+	g.addLogLocked("Saved config.toml")
+	return true
+}
+
+func (g *GUI) showPadConfig(idx int) {
+	note := widget.NewEntry()
+	note.SetText(strconv.Itoa(int(g.cfg.PadNotes[idx])))
+	colorSelect := widget.NewSelect(colorOptions(), nil)
+	colorSelect.SetSelected(g.cfg.PadColors[idx])
+
+	d := dialog.NewForm(fmt.Sprintf("Pad %d Config", idx+1), "Save", "Cancel", []*widget.FormItem{
+		widget.NewFormItem("MIDI note", note),
+		widget.NewFormItem("Idle color", colorSelect),
+	}, func(ok bool) {
+		if !ok {
+			return
+		}
+		n, err := parseUint8Entry("MIDI note", note.Text, 0, 127)
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+		g.cfg.PadNotes[idx] = n
+		g.cfg.PadColors[idx] = colorSelect.Selected
+		g.saveConfig()
+	}, g.window)
+	d.Show()
+}
+
+func (g *GUI) showPadColorMenu(idx int, pos fyne.Position) {
+	items := make([]*fyne.MenuItem, 0, len(colorOptions()))
+	for _, colorName := range colorOptions() {
+		name := colorName
+		items = append(items, fyne.NewMenuItem(name, func() {
+			g.cfg.PadColors[idx] = name
+			g.saveConfig()
+		}))
+	}
+	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("Pad Color", items...), g.window.Canvas(), pos)
+}
+
+func (g *GUI) showButtonConfig(idx int) {
+	note := widget.NewEntry()
+	note.SetText(strconv.Itoa(int(g.cfg.ButtonNotes[idx])))
+	cc := widget.NewEntry()
+	cc.SetText(strconv.Itoa(int(g.cfg.ButtonCCs[idx])))
+	ledSelect := widget.NewSelect(intensityOptions(), nil)
+	ledSelect.SetSelected(g.cfg.ButtonLEDs[idx])
+
+	d := dialog.NewForm(fmt.Sprintf("%s Config", mikro.Button(idx)), "Save", "Cancel", []*widget.FormItem{
+		widget.NewFormItem("MIDI note", note),
+		widget.NewFormItem("MIDI CC", cc),
+		widget.NewFormItem("Default LED", ledSelect),
+	}, func(ok bool) {
+		if !ok {
+			return
+		}
+		n, err := parseUint8Entry("MIDI note", note.Text, 0, 127)
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+		c, err := parseUint8Entry("MIDI CC", cc.Text, 0, 127)
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+		g.cfg.ButtonNotes[idx] = n
+		g.cfg.ButtonCCs[idx] = c
+		g.cfg.ButtonLEDs[idx] = ledSelect.Selected
+		g.saveConfig()
+	}, g.window)
+	d.Show()
+}
+
+func (g *GUI) showButtonLEDMenu(idx int, pos fyne.Position) {
+	items := make([]*fyne.MenuItem, 0, len(intensityOptions()))
+	for _, intensity := range intensityOptions() {
+		name := intensity
+		items = append(items, fyne.NewMenuItem(name, func() {
+			g.cfg.ButtonLEDs[idx] = name
+			g.saveConfig()
+		}))
+	}
+	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("Button LED", items...), g.window.Canvas(), pos)
+}
+
+func (g *GUI) showGlobalConfig() {
+	port := widget.NewEntry()
+	port.SetText(g.cfg.PortName)
+	channel := widget.NewEntry()
+	channel.SetText(strconv.Itoa(int(g.cfg.Channel)))
+	activeColor := widget.NewSelect(colorOptions(), nil)
+	activeColor.SetSelected(g.cfg.PadColorActive)
+	activeLevel := widget.NewSelect(colorLevelOptions(), nil)
+	activeLevel.SetSelected(g.cfg.PadLevelActive)
+	idleLevel := widget.NewSelect(colorLevelOptions(), nil)
+	idleLevel.SetSelected(g.cfg.PadLevelIdle)
+	encoderCC := widget.NewEntry()
+	encoderCC.SetText(strconv.Itoa(int(g.cfg.EncoderCC)))
+	stripCC := widget.NewEntry()
+	stripCC.SetText(strconv.Itoa(int(g.cfg.TouchStripCC)))
+	stripCC2 := widget.NewEntry()
+	stripCC2.SetText(strconv.Itoa(int(g.cfg.TouchStripCC2)))
+	stripMin := widget.NewEntry()
+	stripMin.SetText(strconv.Itoa(int(g.cfg.TouchStripMin)))
+	stripMax := widget.NewEntry()
+	stripMax.SetText(strconv.Itoa(int(g.cfg.TouchStripMax)))
+	stripRelease := widget.NewSelect([]string{"hold", "zero", "center"}, nil)
+	stripRelease.SetSelected(g.cfg.TouchStripRelease)
+	sendNotes := widget.NewCheck("", nil)
+	sendNotes.SetChecked(g.cfg.SendButtonNotes)
+	sendCCs := widget.NewCheck("", nil)
+	sendCCs.SetChecked(g.cfg.SendButtonCCs)
+	transport := widget.NewCheck("", nil)
+	transport.SetChecked(g.cfg.EnableTransport)
+	buttonLEDs := widget.NewCheck("", nil)
+	buttonLEDs.SetChecked(g.cfg.ButtonLEDEnabled)
+
+	d := dialog.NewForm("Global Config", "Save", "Cancel", []*widget.FormItem{
+		widget.NewFormItem("Port name", port),
+		widget.NewFormItem("MIDI channel", channel),
+		widget.NewFormItem("Active pad color", activeColor),
+		widget.NewFormItem("Pad active brightness", activeLevel),
+		widget.NewFormItem("Pad idle brightness", idleLevel),
+		widget.NewFormItem("Encoder CC", encoderCC),
+		widget.NewFormItem("Touch strip CC 1", stripCC),
+		widget.NewFormItem("Touch strip CC 2", stripCC2),
+		widget.NewFormItem("Touch strip min", stripMin),
+		widget.NewFormItem("Touch strip max", stripMax),
+		widget.NewFormItem("Touch release", stripRelease),
+		widget.NewFormItem("Send button notes", sendNotes),
+		widget.NewFormItem("Send button CCs", sendCCs),
+		widget.NewFormItem("Transport", transport),
+		widget.NewFormItem("Button LEDs", buttonLEDs),
+	}, func(ok bool) {
+		if !ok {
+			return
+		}
+		ch, err := parseUint8Entry("MIDI channel", channel.Text, 0, 15)
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+		enc, err := parseUint8Entry("Encoder CC", encoderCC.Text, 0, 127)
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+		s1, err := parseUint8Entry("Touch strip CC 1", stripCC.Text, 0, 127)
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+		s2, err := parseUint8Entry("Touch strip CC 2", stripCC2.Text, 0, 127)
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+		min, err := parseUint8Entry("Touch strip min", stripMin.Text, 0, 254)
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+		max, err := parseUint8Entry("Touch strip max", stripMax.Text, 1, 255)
+		if err != nil {
+			dialog.ShowError(err, g.window)
+			return
+		}
+		if min >= max {
+			dialog.ShowError(fmt.Errorf("touch strip min must be less than max"), g.window)
+			return
+		}
+
+		g.cfg.PortName = port.Text
+		g.cfg.Channel = ch
+		g.cfg.PadColorActive = activeColor.Selected
+		g.cfg.PadLevelActive = activeLevel.Selected
+		g.cfg.PadLevelIdle = idleLevel.Selected
+		g.cfg.EncoderCC = enc
+		g.cfg.TouchStripCC = s1
+		g.cfg.TouchStripCC2 = s2
+		g.cfg.TouchStripMin = min
+		g.cfg.TouchStripMax = max
+		g.cfg.TouchStripRelease = stripRelease.Selected
+		g.cfg.SendButtonNotes = sendNotes.Checked
+		g.cfg.SendButtonCCs = sendCCs.Checked
+		g.cfg.EnableTransport = transport.Checked
+		g.cfg.ButtonLEDEnabled = buttonLEDs.Checked
+		g.saveConfig()
+	}, g.window)
+	d.Resize(fyne.NewSize(460, 640))
+	d.Show()
+}
+
+func parseUint8Entry(name, text string, min, max int) (uint8, error) {
+	v, err := strconv.Atoi(strings.TrimSpace(text))
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a number", name)
+	}
+	if v < min || v > max {
+		return 0, fmt.Errorf("%s must be %d-%d", name, min, max)
+	}
+	return uint8(v), nil
+}
+
+func colorOptions() []string {
+	return []string{"off", "red", "orange", "light_orange", "warm_yellow", "yellow", "lime", "green", "mint", "cyan", "turquoise", "blue", "plum", "violet", "purple", "magenta", "fuchsia", "white"}
+}
+
+func intensityOptions() []string {
+	return []string{"off", "low", "medium", "high"}
+}
+
+func colorLevelOptions() []string {
+	return []string{"low", "medium", "high", "faded"}
 }
 
 func (g *GUI) SetStatus(text string) {
@@ -153,7 +526,7 @@ func (g *GUI) PadOn(idx int, velocity uint8) {
 	fyne.Do(func() {
 		g.pads[idx].FillColor = g.activeColor
 		g.pads[idx].Refresh()
-		g.addLogLocked(fmt.Sprintf("Pad %2d ON  vel %3d", idx+1, velocity))
+		g.addLogEvery(4, fmt.Sprintf("Pad %2d ON  vel %3d", idx+1, velocity))
 	})
 }
 
@@ -164,7 +537,7 @@ func (g *GUI) PadOff(idx int) {
 	fyne.Do(func() {
 		g.pads[idx].FillColor = g.padIdleColors[idx]
 		g.pads[idx].Refresh()
-		g.addLogLocked(fmt.Sprintf("Pad %2d OFF", idx+1))
+		g.addLogEvery(4, fmt.Sprintf("Pad %2d OFF", idx+1))
 	})
 }
 
@@ -186,7 +559,7 @@ func (g *GUI) ButtonOff(btn mikro.Button, note, cc uint8) {
 		return
 	}
 	fyne.Do(func() {
-		g.buttons[idx].FillColor = controlIdleColor
+		g.buttons[idx].FillColor = g.buttonIdleColor(idx)
 		g.buttons[idx].Refresh()
 		g.addLogLocked(fmt.Sprintf("Button %-10s OFF note %3d cc %3d", btn, note, cc))
 	})
@@ -215,6 +588,16 @@ func (g *GUI) addLogLocked(line string) {
 		g.logLines = g.logLines[:30]
 	}
 	g.logLbl.SetText(strings.Join(g.logLines, "\n") + "\n")
+}
+
+func (g *GUI) addLogEvery(n int, line string) {
+	g.mu.Lock()
+	g.logCount++
+	shouldLog := g.logCount%n == 0
+	g.mu.Unlock()
+	if shouldLog {
+		g.addLogLocked(line)
+	}
 }
 
 func (g *GUI) Run() {
