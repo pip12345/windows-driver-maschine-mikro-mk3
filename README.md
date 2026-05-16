@@ -1,8 +1,13 @@
 # Maschine Mikro MK3 MIDI Driver for Windows
 
-Lightweight standalone MIDI driver for the Native Instruments Maschine Mikro MK3.
+Lightweight MIDI driver for the Native Instruments Maschine Mikro MK3.
 No NI software required. Talks directly to the hardware over USB HID and exposes
 a virtual MIDI port that any DAW can use.
+
+Mostly AI slop, but works and gets past the hardware DRM.
+
+Only the pads are supported right now. Buttons, encoder input, LEDs, screens,
+transport controls, and other Maschine features are not translated to MIDI yet.
 
 ## Prerequisites
 
@@ -49,6 +54,13 @@ make build-windows        # debug build
 make release-windows      # stripped release build
 ```
 
+If you do not want to install Go or mingw locally, use Docker:
+
+```bash
+make docker-build          # debug build
+make docker-release        # stripped release build
+```
+
 ## How It Works
 
 The Maschine Mikro MK3 communicates over USB HID (VID `0x17cc`, PID `0x1700`).
@@ -62,3 +74,7 @@ MIDI messages, which are sent through a virtual MIDI port created via the
 - [essaim.dev/mikro](https://github.com/essaim-dev/mikro) - Go HID driver for the MK3
 - [r00tman/maschine-mikro-mk3-driver](https://github.com/r00tman/maschine-mikro-mk3-driver) - Rust driver (protocol reference)
 - [virtualMIDI SDK](https://www.tobias-erichsen.de/software/virtualmidi/) - Virtual MIDI port creation
+
+## License
+
+Unlicense. Do whatever you want with it.

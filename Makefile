@@ -1,9 +1,7 @@
 BINARY_NAME=mikro-midi
 GOFLAGS=-trimpath
 
-# Local Go toolchain (for native builds)
-GOROOT=$(CURDIR)/.tools/go
-GO=$(GOROOT)/bin/go
+GO=go
 
 # Docker
 DOCKER_IMAGE=mikro-midi-builder
@@ -33,10 +31,10 @@ docker-image:
 	docker build -t $(DOCKER_IMAGE) -f Dockerfile.build .
 
 docker-build: docker-image
-	$(DOCKER) sh -c 'GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -buildvcs=false -trimpath -o $(BINARY_NAME).exe .'
+	$(DOCKER) sh -c 'GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -buildvcs=false $(GOFLAGS) -o $(BINARY_NAME).exe .'
 
 docker-release: docker-image
-	$(DOCKER) sh -c 'GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -buildvcs=false -trimpath -ldflags="-s -w" -o $(BINARY_NAME).exe .'
+	$(DOCKER) sh -c 'GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -buildvcs=false $(GOFLAGS) -ldflags="-s -w" -o $(BINARY_NAME).exe .'
 
 tidy:
 	$(GO) mod tidy
